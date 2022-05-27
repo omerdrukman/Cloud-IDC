@@ -62,8 +62,10 @@ ssh -i $KEY_PEM -o "StrictHostKeyChecking=no" -o "ConnectionAttempts=60" ubuntu@
     sudo apt update
     sudo echo "after update"
     sudo apt install python3-flask -y
+    sudo apt install pytohn3
+    sudo pip install requests boto3
     # run app
-    nohup flask run --host 0.0.0.0  &>/dev/null &
+    OTHER_IP=localhost nohup flask run --host 0.0.0.0  &>/dev/null &
     exit
 EOF
 

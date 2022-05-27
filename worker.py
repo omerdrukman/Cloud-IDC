@@ -4,9 +4,9 @@ import uuid
 import os
 
 master_ip = os.environ.get('MASTER_IP')
-master_ip = 'localhost'
+# master_ip = 'localhost'
 
-PORT = 5005
+PORT = 5000
 
 import hashlib
 
@@ -21,7 +21,7 @@ def worker():
      while True:
           try:
                # get task task
-               res = requests.get(f'http://{master_ip}:5004/getWork')
+               res = requests.get(f'http://{master_ip}:{PORT}/getWork')
           except:
                time.sleep(5)
                continue
@@ -40,6 +40,7 @@ def worker():
           result = work(buffer.encode('utf-8'), iterations)
 
           # inform done task
-          res = requests.post(f'http://{master_ip}:5004/finishWork', data={'task_id': task_id, 'result': result})
+          res = requests.post(f'http://{master_ip}:{PORT}/finishWork', data={'task_id': task_id, 'result': result})
+          time.sleep(2)
 
 worker()

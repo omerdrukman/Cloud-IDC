@@ -1,5 +1,4 @@
 from flask import Flask, request, session
-import queue
 import time
 import uuid
 import os
@@ -7,22 +6,20 @@ import requests
 import random
 import boto3
 
-ec2 = boto3.resource('ec2', region_name='us-west-2')
-ec2Client = boto3.client('ec2', region_name='us-west-2')
+ec2 = boto3.resource('ec2', region_name='us-east-1')
+ec2Client = boto3.client('ec2', region_name='us-east-1')
 
 app = Flask(__name__)
 app.secret_key = 'some-key'
-PRICE_PER_HOUR = 10
-PORT=5004
+PORT=5000
 
-other_router_ip='localhost'
+# other_router_ip='localhost'
 
 wating_jobs_queue = []
 finish_jobs_queue = []
 workers = []
 
 workload_count = 0
-
 
 other_router_ip = os.environ.get('OTHER_IP')
 
@@ -127,17 +124,26 @@ def getCompleteQueue():
 
 
 def spawn_worker():
-     f = open("worker.py", "r")
-     userDataCode = f"""'{f.read()}' > worker.py
+     response = ec2.describe_security_groups(
+          Filters=[
+               dict(Name="omer-sg", Values=[group_name])
+          ]
+     )
+     group_id = response['SecurityGroups'][0]['GroupId']
+
+     userDataCode = f"""
      sudo echo "before update"
      sudo apt update
      sudo echo "after update"
+     sudo apt install git
      sudo apt install python3 -y
-     sudo pip install requests 
+     sudo pip install requests boto3
+     sudo git pull git@github.com:omerdrukman/Cloud-IDC.git
      # run app
      MASTER_IP={requests.get('https://api.ipify.org').content.decode('utf8')} nohup python worker.py
      exit
      """
+
      instanceLst = ec2.create_instances(ImageId="ami-042e8287309f5df03",
                                         MinCount=1,
                                         MaxCount=1,
@@ -154,6 +160,19 @@ def spawn_worker():
                                         #      }
                                         # ]
                                         )
+
+
+     instanceLst[0].wait_until_running()
+
+     data = ec2.authorize_security_group_ingress(
+          GroupId=security_group_id,
+          IpPermissions=[
+               {'IpProtocol': 'tcp',
+                'FromPort': 5000,
+                'ToPort': 5000,
+                'IpRanges': [{'CidrIp': f'{instanceLst[0].public_ip_address}/0'}]},
+          ])
+
      workers.append(instanceLst[0].id)
-spawn_worker()
-# app.run('0.0.0.0', port=PORT)
+
+app.run('0.0.0.0', port=PORT)
