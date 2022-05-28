@@ -117,7 +117,7 @@ def auto_scale():
                if time.time() - job[1] > 3:
                     print('spawn worker')
                     id = spawn_worker()
-                    time.sleep(3000)
+                    time.sleep(30)
 
           if id is None:
                workload_count += 1
