@@ -1,6 +1,9 @@
 # debug
 # set -o xtrace
 
+ACCESS_KEY=$(aws configure get aws_access_key_id)
+SECRET_KEY=$(aws configure get aws_secret_access_key)
+
 KEY_NAME="cloud-course-omer-key"
 KEY_PEM="$KEY_NAME.pem"
 
@@ -15,7 +18,7 @@ SEC_GRP="omer-sg"
 echo "setup firewall $SEC_GRP"
 aws ec2 create-security-group   \
     --group-name $SEC_GRP       \
-    --description "Access my instances" 
+    --description "Access my instances"
 
 # figure out my ip
 MY_IP=$(curl ipinfo.io/ip)
@@ -39,35 +42,74 @@ RUN_INSTANCES=$(aws ec2 run-instances   \
     --image-id $UBUNTU_20_04_AMI        \
     --instance-type t3.micro            \
     --key-name $KEY_NAME                \
-    --security-groups $SEC_GRP)
+    --security-groups $SEC_GRP          \
+    --count 2:2)
 
-INSTANCE_ID=$(echo $RUN_INSTANCES | jq -r '.Instances[0].InstanceId')
+INSTANCE_ID_1=$(echo $RUN_INSTANCES | jq -r '.Instances[0].InstanceId')
+INSTANCE_ID_2=$(echo $RUN_INSTANCES | jq -r '.Instances[1].InstanceId')
 
 echo "Waiting for instance creation..."
-aws ec2 wait instance-running --instance-ids $INSTANCE_ID
+aws ec2 wait instance-running --instance-ids $INSTANCE_ID_1 $INSTANCE_ID_2
 
-PUBLIC_IP=$(aws ec2 describe-instances  --instance-ids $INSTANCE_ID | 
+PUBLIC_IP_1=$(aws ec2 describe-instances  --instance-ids $INSTANCE_ID_1 |
     jq -r '.Reservations[0].Instances[0].PublicIpAddress'
 )
 
-echo "New instance $INSTANCE_ID @ $PUBLIC_IP"
+PUBLIC_IP_2=$(aws ec2 describe-instances  --instance-ids $INSTANCE_ID_2 |
+    jq -r '.Reservations[0].Instances[0].PublicIpAddress'
+)
+
+echo "New instance $INSTANCE_ID_1 @ $PUBLIC_IP_1"
+echo "New instance $INSTANCE_ID_2 @ $PUBLIC_IP_2"
+
 
 echo "deploying code to production"
-scp -i $KEY_PEM -o "StrictHostKeyChecking=no" -o "ConnectionAttempts=60" app.py ubuntu@$PUBLIC_IP:/home/ubuntu/
-scp -i $KEY_PEM -o "StrictHostKeyChecking=no" -o "ConnectionAttempts=60" worker.py ubuntu@$PUBLIC_IP:/home/ubuntu/
+scp -i $KEY_PEM -o "StrictHostKeyChecking=no" -o "ConnectionAttempts=60" app.py ubuntu@$PUBLIC_IP_1:/home/ubuntu/
+scp -i $KEY_PEM -o "StrictHostKeyChecking=no" -o "ConnectionAttempts=60" app.py ubuntu@$PUBLIC_IP_2:/home/ubuntu/
+
+echo "[DEFAULT]" > config
+echo "ACCESS_KEY = $ACCESS_KEY" >> config
+echo "SECRET_KEY = $SECRET_KEY" >> config
+echo "OTHER_IP = $PUBLIC_IP_1" >> config
+
+scp -i $KEY_PEM -o "StrictHostKeyChecking=no" -o "ConnectionAttempts=60" config ubuntu@$PUBLIC_IP_2:/home/ubuntu/
+
+echo "[DEFAULT]" > config
+echo "ACCESS_KEY = $ACCESS_KEY" >> config
+echo "SECRET_KEY = $SECRET_KEY" >> config
+echo "OTHER_IP = $PUBLIC_IP_2" >> config
+
+scp -i $KEY_PEM -o "StrictHostKeyChecking=no" -o "ConnectionAttempts=60" config ubuntu@$PUBLIC_IP_1:/home/ubuntu/
 
 echo "setup production environment"
-ssh -i $KEY_PEM -o "StrictHostKeyChecking=no" -o "ConnectionAttempts=60" ubuntu@$PUBLIC_IP <<EOF
+ssh -i $KEY_PEM -o "StrictHostKeyChecking=no" -o "ConnectionAttempts=60" ubuntu@$PUBLIC_IP_1 <<EOF
     sudo echo "before update"
     sudo apt update
     sudo echo "after update"
+    sudo apt install pytohn3 -y
+    sudo apt install pip -y
     sudo apt install python3-flask -y
-    sudo apt install pytohn3
+    sudo pip install requests boto3
+    export OTHER_IP=$PUBLIC_IP_2
+    export AWS_ACCESS_KEY=$ACCESS_KEY
+    export AWS_SECRET_KEY=$SECRET_KEY
+    # run app
+    OTHER_IP=$PUBLIC_IP_2 ACCESS_KEY=$ACCESS_KEY SECRET_KEY=$SECRET_KEY nohup flask run --host 0.0.0.0  &>/dev/null &
+    exit
+EOF
+
+ssh -i $KEY_PEM -o "StrictHostKeyChecking=no" -o "ConnectionAttempts=60" ubuntu@$PUBLIC_IP_2 <<EOF
+    sudo echo "before update"
+    sudo apt update
+    sudo echo "after update"
+    sudo apt install pytohn3 -y
+    sudo apt install pip -y
+    sudo apt install python3-flask -y
     sudo pip install requests boto3
     # run app
-    OTHER_IP=localhost nohup flask run --host 0.0.0.0  &>/dev/null &
+    nohup flask run --host 0.0.0.0  &>/dev/null &
     exit
 EOF
 
 echo "test that it all worked"
-curl  --retry-connrefused --retry 10 --retry-delay 1  http://$PUBLIC_IP:5000
+curl  --retry-connrefused --retry 10 --retry-delay 1  http://$PUBLIC_IP_1:5000
